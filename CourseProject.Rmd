@@ -1,0 +1,185 @@
+---
+title: "Practical Machine Learning - Course Project"
+author: "Jerry Harber"
+date: "August 30, 2017"
+output:
+  html_document:
+    keep_md: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### Executive Summary  
+  
+Using a random forest prediction model, the following predictors were used to predict "classe";  
+
+* avg_roll_belt
+* avg_pitch_belt
+* avg_yaw_belt
+* avg_roll_arm
+* avg_pitch_arm
+* avg_yaw_arm
+* avg_roll_dumbbell
+* avg_pitch_dumbbell
+* avg_yaw_dumbbell
+* avg_roll_forearm
+* avg_pitch_forearm
+* avg_yaw_forearm
+
+These predictors were based on the the following paper;  
+
+* Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+
+The data used in this analysis was based on this paper. The authors also used summary statistics in order to create their model.
+
+
+#### Analysis Results  
+  
+Analysis results indicated the random forest classification model used to predict "classe" was somewhat moderately significant. Using all the predictors in the data set (i.e., 160 variables) was problematic for a random forest model due to computer memory constraints. Reducing the number of predictors to 12 and using only observations that had a value for the predictor, significantly reduced the amount of computer memory. See the final results in each section below.  
+  
+#### My setup
+```{r mySetup, echo=FALSE,include=TRUE}
+library(dplyr)
+library(colorspace)
+library(lattice)
+library(ggplot2)
+library(e1071)
+library(randomForest)
+library(caret)
+```
+  
+#### Download and load data
+  
+Download the training and the testing data. Read the data sets into a data.frame
+```{r inputData, echo=TRUE,include=TRUE}
+url <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+download.file(url,"training.csv")
+training_raw <- read.csv("training.csv")
+url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(url,"testing.csv")
+testCases_raw <- read.csv("testing.csv")
+```
+  
+#### Create a "tidy"  training and testing data set
+```{r createTidy, echo=TRUE,include=TRUE}
+## Create a training data set based on the training_raw data set.
+p_training <- 0.90
+
+set.seed(3383)
+inTrain <- createDataPartition(y=training_raw$classe, p=p_training, list=FALSE)
+
+## Use only averages via the style of the paper
+varsToUse <-c("avg_roll_belt","avg_pitch_belt","avg_yaw_belt","avg_roll_arm","avg_pitch_arm","avg_yaw_arm", "avg_roll_dumbbell", "avg_pitch_dumbbell", "avg_yaw_dumbbell", "avg_roll_forearm", "avg_pitch_forearm", "avg_yaw_forearm", "classe")
+
+new_names <-c("roll_belt", "pitch_belt", "yaw_belt", "roll_arm", "pitch_arm", "yaw_arm", "roll_dumbbell", "pitch_dumbbell", "yaw_dumbbell", "roll_forearm", "pitch_forearm", "yaw_forearm", "classe")
+
+## Create a training data set based on the training_raw data set.
+## Use only averages via the style of the paper. Remove any rows that has NA for avg_roll_belt.
+## Remove any rows that has NA for avg_roll_belt. Change variable names to be compatible with testCases
+training <- training_raw[inTrain,]
+l <- is.na(training$avg_roll_belt)
+tidy_training <- training[!l,varsToUse]
+colnames(tidy_training) <- new_names
+nrow(tidy_training)
+ncol(tidy_training)
+
+## Create a testing data set based on the training_raw data set.
+## Use only averages via the style of the paper. Remove any rows that has NA for avg_roll_belt.
+testing <- training_raw[-inTrain,]
+l <- is.na(testing$avg_roll_belt)
+tidy_testing <- testing[!l,varsToUse]
+colnames(tidy_testing) <- new_names
+nrow(tidy_testing)
+ncol(tidy_testing)
+```
+  
+#### Build a Random Forest model using the tidy_training data set.
+
+```{r rfModel, echo=TRUE,include=TRUE}
+modFit_rf <- train(classe ~ . , data=tidy_training, method="rf", prox = TRUE)
+modFit_rf
+modFit_rf$finalModel
+
+a <- modFit_rf$finalModel$confusion
+n <- sum(a[,1:5])
+d <- sum(diag(a[,1:5]))
+myErr_rate <- round( (1 - (d/n)) * 100,2)
+```
+Results indicated that for my chosen predictors, the best fit model had an accuracy of `r modFit_rf$results[1,2]` while the confusion matrix had an OOB (Out of Bag) error rate of `r myErr_rate` % (number misclassified divided by the total). 
+
+#### Validate the model.
+
+The model created with the tidy_training data set was used to predict "classe" on 2 subsets of the tidy_training data set. Data sets val1 and val2 are approximately 75% the size of the tidy_training data set.
+
+```{r validateModel, echo=TRUE,include=TRUE}
+
+## Validation
+##new_names <-c("roll_belt", "pitch_belt", "yaw_belt", "roll_arm", "pitch_arm", "yaw_arm", "roll_dumbbell", ##pitch_dumbbell", "yaw_dumbbell", "roll_forearm", "pitch_forearm", "yaw_forearm", "classe")
+{
+    print("-------------- Model validation 1 ----------------")
+    set.seed(3383)
+    p_val_training <- 0.75
+    inTrain <- createDataPartition(y=tidy_training$classe, p=p_val_training, list=FALSE)
+    val_training <- tidy_training[inTrain,]
+    val_testing <- tidy_training[-inTrain,]
+
+    modFit_rf_val1 <- train(classe ~ roll_belt+pitch_belt+yaw_belt+roll_arm+pitch_arm+yaw_arm, data=val_training,
+                      method="rf", prox = TRUE)
+    print(modFit_rf_val1)
+    print(modFit_rf_val1$finalModel)
+    
+    predVal_Test1 <- predict(modFit_rf_val1, val_testing)
+    tbl1 <- table(predVal_Test1, val_testing$classe)
+    d <- sum(diag(tbl1))
+    n <- sum(tbl1)
+    myErr_rate_val1 <- round( (1 - (d/n)) * 100,2)
+    print("Table of predition versus testing validation data")
+    print(paste("My out of sample error rate estimate = ", myErr_rate_val1))
+}
+
+{
+    print("-------------- Model validation 2 ----------------")
+    set.seed(3383)
+    p_val_training <- 0.75
+    inTrain <- createDataPartition(y=tidy_training$classe, p=p_val_training, list=FALSE)
+    val_training <- tidy_training[inTrain,]
+    val_testing <- tidy_training[-inTrain,]
+
+    modFit_rf_val2 <- train(classe ~ ., data=val_training,method="rf", prox = TRUE)
+    print(modFit_rf_val2)
+    print(modFit_rf_val2$finalModel)
+    
+    predVal_Test2 <- predict(modFit_rf_val2, val_testing)
+    tbl2 <- table(predVal_Test2, val_testing$classe)
+    d <- sum(diag(tbl2))
+    n <- sum(tbl2)
+    myErr_rate_val2 <- round( (1 - (d/n)) * 100,2)
+    print("Table of predition versus testing validation data")
+    print(paste("My out of sample error rate estimate = ", myErr_rate_val2))
+}
+
+```
+
+#### Predict test cases"classe"" for the test cases data set using the Random Forest model
+```{r predictClasse, echo=TRUE,include=TRUE}
+set.seed(3383)
+predTestCases <- predict(modFit_rf, testCases_raw)
+predTestCases
+```
+  
+#### Determine "out of sample" error
+```{r oosError, echo=TRUE,include=TRUE}
+set.seed(3383)
+predTest <- predict(modFit_rf, testing)
+
+tbl <- table(predTest, testing$classe)
+d <- sum(diag(tbl))
+n <- sum(tbl)
+myErr_rate <- round( (1 - (d/n)) * 100,2)
+myErr_rate
+```
+  
+The out of sample error rate is `r myErr_rate` %.
